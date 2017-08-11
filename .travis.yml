@@ -1,0 +1,71 @@
+# See https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards/blob/develop/.travis.yml
+sudo: false
+
+language: php
+
+php:
+    - 5.3
+    - 5.4
+    - 5.6
+    - 7.0
+
+env:
+    # Branch for patches against 2.x. `master` is now 3.x which WPCS is not (yet) compatible with.
+    - PHPCS_BRANCH=2.9
+    # Tagged release
+    - PHPCS_BRANCH=2.9.0
+
+matrix:
+    fast_finish: true
+    include:
+        # WP Discourse can't be installed on php < 5.4, run tests against php 5.3 to make sure we can display an appropriate error message.
+        - php: 5.3
+        - php: 5.4
+          env: PHPCS_BRANCH=2.9 SNIFF=1
+        # Run PHPCS against WPCS. I just picked to run it against 5.5.
+        - php: 5.5
+          env: PHPCS_BRANCH=2.9 SNIFF=1
+        # Run against PHPCS 3.0. I just picked to run it against 5.6.
+        - php: 5.6
+          env: PHPCS_BRANCH=master
+        - php: 7.0
+
+    allow_failures:
+        - php: hhvm
+
+before_install:
+    - export PHPCS_DIR=/tmp/phpcs
+    - export SNIFFS_DIR=/tmp/sniffs
+    - export PHPUNIT_DIR=/tmp/phpunit
+    - export PHPCS_BIN=$(if [[ $PHPCS_BRANCH == master ]]; then echo $PHPCS_DIR/bin/phpcs; else echo $PHPCS_DIR/scripts/phpcs; fi)
+    - mkdir -p $PHPCS_DIR && git clone --depth 1 https://github.com/squizlabs/PHP_CodeSniffer.git -b $PHPCS_BRANCH $PHPCS_DIR
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards.git $SNIFFS_DIR; fi
+    - if [[ "$SNIFF" == "1" ]]; then git clone -b master --depth 1 https://github.com/wimg/PHPCompatibility.git $SNIFFS_DIR/PHPCompatibility; fi
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs --config-set installed_paths $SNIFFS_DIR; fi
+    - if [[ "$SNIFF" == "1" ]]; then phpenv rehash; fi
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jscs; fi
+    - if [[ "$SNIFF" == "1" ]]; then npm install -g jshint; fi
+    - if [[ "$SNIFF" == "1" ]]; then wget https://develop.svn.wordpress.org/trunk/.jshintrc; fi
+    # Download PHPUnit 5.x for builds on PHP 7, nightly and HHVM as
+    # PHPCS test suite is currently not compatible with PHPUnit 6.x.
+    - if [[ ${TRAVIS_PHP_VERSION:0:2} != "5." ]]; then wget -P $PHPUNIT_DIR https://phar.phpunit.de/phpunit-5.7.phar && chmod +x $PHPUNIT_DIR/phpunit-5.7.phar; fi
+    - if [[ "$SNIFF" == "1" ]]; then bash bin/install-wp-tests.sh wordpress_test root '' localhost latest; fi
+
+script:
+    - find -L . -name '*.php' -and ! -name 'test*.php' -and ! -path './vendor/*' -print0 | xargs -0 -n 1 -P 4 php -l
+    - if [[ "$SNIFF" == "1" ]]; then jshint .; fi
+    - if [[ "$SNIFF" == "1" ]]; then jscs .; fi
+    # WordPress Coding Standards.
+    # @link https://github.com/WordPress-Coding-Standards/WordPress-Coding-Standards
+    # @link http://pear.php.net/package/PHP_CodeSniffer/
+    # -p flag: Show progress of the run.
+    # -s flag: Show sniff codes in all reports.
+    # -v flag: Print verbose output.
+    # -n flag: Do not print warnings. (shortcut for --warning-severity=0)
+    # --standard: Use WordPress as the standard.
+    # --extensions: Only sniff PHP files.
+    - if [[ "$SNIFF" == "1" ]]; then $PHPCS_DIR/scripts/phpcs -p -s -v -n . --standard=./codesniffer.ruleset.xml --ignore=*/tests/*,*/tests/lib/*,*/lib/wp-new-user-notification.php*,*/vendor/* --extensions=php; fi
+    - if [[ "$SNIFF" == "1" ]]; then phpunit; fi
+
+notifications:
+    email: false
